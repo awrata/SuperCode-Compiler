@@ -17,4 +17,4 @@ env/
 *.tmp
 
 #source codes
-source-code/
+test/

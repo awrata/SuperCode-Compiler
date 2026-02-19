@@ -1,7 +1,7 @@
 # src/parser.py
 from enum import Enum, auto
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
 import src.astcollections as asts
 
 # ===== Token Types =====
@@ -38,6 +38,17 @@ data_type_map = {'int', 'string', 'bool', 'void'}
 
 # ===== Default values (runtime) =====
 default_values = {'int':'0', 'string':'""', 'bool':'false'}
+
+# ===== Parser Constants =====
+FUNCTION_KEYWORD = 'function'
+DONE_KEYWORD = 'done'
+ASSIGN_OP = '='
+COLON = ':'
+LPAREN = '('
+RPAREN = ')'
+COMMA = ','
+SEMICOLON = ';'
+EOF_VALUE = 'EOF'
 
 # ===== Lexer =====
 def tokenize(source: str) -> List[Token]:
@@ -126,7 +137,7 @@ def tokenize(source: str) -> List[Token]:
         # unknown char → skip
         advance()
 
-    eof = Token(TokenType.EOF, "EOF")
+    eof = Token(TokenType.EOF, EOF_VALUE)
     eof.position = Position(column,row)
     tokens.append(eof)
     return tokens
@@ -135,139 +146,152 @@ def tokenize(source: str) -> List[Token]:
 def get_error_message(msg, position):
     return f"{msg} on line {position.row}, column {position.coloums}"
 
-# ===== Parser =====
-def parse_sc(tokens: List[Token]) -> asts.Program:
-    i = 0
-    result_ast: List[asts.Statement] = []
+# ===== Parser Class =====
+class Parser:
+    def __init__(self, tokens: List[Token]):
+        self.tokens = tokens
+        self.i = 0
 
-    def look_ahead(step, condition):
-        return i+step < len(tokens) and condition(tokens[i+step])
+    def consume(self, step: int = 1) -> None:
+        """Advance the token pointer by step positions."""
+        self.i += step
 
-    def consume(step=1):
-        nonlocal i
-        i += step
+    def look_ahead(self, step: int, condition) -> bool:
+        """Check if a token ahead satisfies the condition."""
+        return self.i + step < len(self.tokens) and condition(self.tokens[self.i + step])
 
-    # ===== Expression Parser =====
-    def parse_expression():
-        nonlocal i
-        token = tokens[i]
+    def current_token(self) -> Token:
+        """Get the current token."""
+        if self.i < len(self.tokens):
+            return self.tokens[self.i]
+        return self.tokens[-1]  # Return EOF if out of bounds
+
+    def parse_expression(self):
+        """Parse an expression (number, string, or identifier)."""
+        token = self.current_token()
         match token.token_type:
             case TokenType.Number:
-                consume()
+                self.consume()
                 return asts.NumberLiteral(token.value)
             case TokenType.StringLiteral:
-                consume()
+                self.consume()
                 return asts.StringLiteral(token.value)
             case TokenType.Identifier:
-                consume()
+                self.consume()
                 return asts.Identifier(token.value)
             case _:
                 raise Exception(get_error_message(f"Unexpected token '{token.value}'", token.position))
 
-    # ===== Variable Parser =====
-    def parse_variable():
-        nonlocal i
-        if tokens[i].token_type != TokenType.DataType:
-            raise Exception(get_error_message("Expected data type for variable", tokens[i].position))
-        dtype = tokens[i].value
-        consume()
+    def parse_variable(self):
+        """Parse a variable declaration."""
+        if self.current_token().token_type != TokenType.DataType:
+            raise Exception(get_error_message("Expected data type for variable", self.current_token().position))
+        dtype = self.current_token().value
+        self.consume()
 
-        if tokens[i].token_type != TokenType.Identifier:
-            raise Exception(get_error_message("Expected variable name", tokens[i].position))
-        name_token = tokens[i]
-        consume()
+        if self.current_token().token_type != TokenType.Identifier:
+            raise Exception(get_error_message("Expected variable name", self.current_token().position))
+        name_token = self.current_token()
+        self.consume()
 
-        if tokens[i].value == '=':
-            consume()
-            expr = parse_expression()
+        if self.current_token().value == ASSIGN_OP:
+            self.consume()
+            expr = self.parse_expression()
         else:
             expr = None  # default value nanti runtime
 
-        if tokens[i].value != ';':
-            raise Exception(get_error_message(f"Expected ';' after variable '{name_token.value}'", tokens[i].position))
-        consume()
+        if self.current_token().value != SEMICOLON:
+            raise Exception(get_error_message(f"Expected '{SEMICOLON}' after variable '{name_token.value}'", self.current_token().position))
+        self.consume()
         return asts.VariableDeclaration(name_token.value, asts.DataType(dtype), expr)
 
-    # ===== Block Parser =====
-    def parse_block():
-        nonlocal i
+    def parse_block(self):
+        """Parse a block of statements between ':' and 'done'."""
         statements = []
-        if tokens[i].value != ':':
-            raise Exception(get_error_message("Expected ':' to start block", tokens[i].position))
-        consume()
-        while tokens[i].value != 'done':
-            t = tokens[i]
+        if self.current_token().value != COLON:
+            raise Exception(get_error_message(f"Expected '{COLON}' to start block", self.current_token().position))
+        self.consume()
+        while self.current_token().value != DONE_KEYWORD:
+            t = self.current_token()
             if t.token_type == TokenType.DataType:
-                statements.append(parse_variable())
+                statements.append(self.parse_variable())
             else:
-                statements.append(parse_expression())
-        consume()  # consume done
+                statements.append(self.parse_expression())
+        self.consume()  # consume done
         return statements
-        
-    def parse_parameter():
-      nonlocal i
 
-      if tokens[i].token_type != TokenType.DataType:
-        raise Exception(get_error_message("Expected parameter type", tokens[i].position))
-      dtype = tokens[i].value
-      consume()
+    def parse_parameter(self):
+        """Parse a function parameter."""
+        if self.current_token().token_type != TokenType.DataType:
+            raise Exception(get_error_message("Expected parameter type", self.current_token().position))
+        dtype = self.current_token().value
+        self.consume()
 
-      if tokens[i].token_type != TokenType.Identifier:
-        raise Exception(get_error_message("Expected parameter name", tokens[i].position))
-      name = tokens[i].value
-      consume()
+        if self.current_token().token_type != TokenType.Identifier:
+            raise Exception(get_error_message("Expected parameter name", self.current_token().position))
+        name = self.current_token().value
+        self.consume()
 
-      return asts.Parameter(asts.Identifier(name), asts.DataType(dtype))
+        return asts.Parameter(asts.Identifier(name), asts.DataType(dtype))
 
-    # ===== Function Parser =====
-    def parse_function():
-        nonlocal i
-        consume()  # consume 'function'
+    def parse_function(self):
+        """Parse a function declaration."""
+        self.consume()  # consume FUNCTION_KEYWORD
 
-        if tokens[i].token_type != TokenType.DataType:
-            raise Exception(get_error_message("Expected return type for function", tokens[i].position))
-        ret_type = tokens[i].value
-        consume()
+        if self.current_token().token_type != TokenType.DataType:
+            raise Exception(get_error_message("Expected return type for function", self.current_token().position))
+        ret_type = self.current_token().value
+        self.consume()
 
-        if tokens[i].token_type != TokenType.Identifier:
-            raise Exception(get_error_message("Expected function name", tokens[i].position))
-        name = tokens[i].value
-        consume()
+        if self.current_token().token_type != TokenType.Identifier:
+            raise Exception(get_error_message("Expected function name", self.current_token().position))
+        name = self.current_token().value
+        self.consume()
 
-        if tokens[i].value != '(':
-            raise Exception(get_error_message("Expected '(' after function name", tokens[i].position))
-        consume()
+        if self.current_token().value != LPAREN:
+            raise Exception(get_error_message(f"Expected '{LPAREN}' after function name", self.current_token().position))
+        self.consume()
         param = []
 
-        if tokens[i].value != ')':
+        if self.current_token().value != RPAREN:
             while True:
-                param.append(parse_parameter())
+                param.append(self.parse_parameter())
         
-                if tokens[i].value == ',':
-                    consume()
+                if self.current_token().value == COMMA:
+                    self.consume()
                     continue
                 break
       
-        if tokens[i].value != ')':
-            raise Exception(get_error_message("Expected ')' after function parameters", tokens[i].position))
-        consume()
+        if self.current_token().value != RPAREN:
+            raise Exception(get_error_message(f"Expected '{RPAREN}' after function parameters", self.current_token().position))
+        self.consume()
 
-        body = parse_block()
+        body = self.parse_block()
         return asts.FunctionDeclaration(name, asts.DataType(ret_type), param, body)
 
-    # ===== Main parse loop =====
-    while tokens[i].token_type != TokenType.EOF:
-        t = tokens[i]
-        match t.token_type:
-            case TokenType.DataType:
-                var = parse_variable()
-                result_ast.append(var)
-                continue
-            case TokenType.Keyword:
-                if t.value == 'function':
-                    func = parse_function()
-                    result_ast.append(func)
-                    continue
-        consume()
+    def parse(self) -> asts.Program:
+        """Parse the tokens and return the AST."""
+        result_ast: List[asts.Statement] = []
 
-    return asts.Program(result_ast)
+        while self.current_token().token_type != TokenType.EOF:
+            t = self.current_token()
+            match t.token_type:
+                case TokenType.DataType:
+                    var = self.parse_variable()
+                    result_ast.append(var)
+                    continue
+                case TokenType.Keyword:
+                    if t.value == FUNCTION_KEYWORD:
+                        func = self.parse_function()
+                        result_ast.append(func)
+                        continue
+            self.consume()
+
+        return asts.Program(result_ast)
+
+
+# ===== Parser function wrapper =====
+def parse_sc(tokens: List[Token]) -> asts.Program:
+    """Parse a list of tokens and return the AST."""
+    parser = Parser(tokens)
+    return parser.parse()
