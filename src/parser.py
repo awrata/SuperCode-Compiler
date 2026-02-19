@@ -33,7 +33,7 @@ class Token:
 # ===== Lexer config =====
 keyword_map = {'function', 'done'}
 operator_map = {'='}
-delimiter_map = {';', ':', '(', ')'}
+delimiter_map = {';', ':', '(', ')', ','}
 data_type_map = {'int', 'string', 'bool', 'void'}
 
 # ===== Default values (runtime) =====
@@ -203,6 +203,21 @@ def parse_sc(tokens: List[Token]) -> asts.Program:
                 statements.append(parse_expression())
         consume()  # consume done
         return statements
+        
+    def parse_parameter():
+      nonlocal i
+
+      if tokens[i].token_type != TokenType.DataType:
+        raise Exception(get_error_message("Expected parameter type", tokens[i].position))
+      dtype = tokens[i].value
+      consume()
+
+      if tokens[i].token_type != TokenType.Identifier:
+        raise Exception(get_error_message("Expected parameter name", tokens[i].position))
+      name = tokens[i].value
+      consume()
+
+      return asts.Parameter(asts.Identifier(name), asts.DataType(dtype))
 
     # ===== Function Parser =====
     def parse_function():
@@ -222,12 +237,23 @@ def parse_sc(tokens: List[Token]) -> asts.Program:
         if tokens[i].value != '(':
             raise Exception(get_error_message("Expected '(' after function name", tokens[i].position))
         consume()
+        param = []
+
+        if tokens[i].value != ')':
+            while True:
+                param.append(parse_parameter())
+        
+                if tokens[i].value == ',':
+                    consume()
+                    continue
+                break
+      
         if tokens[i].value != ')':
             raise Exception(get_error_message("Expected ')' after function parameters", tokens[i].position))
         consume()
 
         body = parse_block()
-        return asts.FunctionDeclaration(name, asts.DataType(ret_type), [], body)
+        return asts.FunctionDeclaration(name, asts.DataType(ret_type), param, body)
 
     # ===== Main parse loop =====
     while tokens[i].token_type != TokenType.EOF:

@@ -48,3 +48,8 @@ class FunctionDeclaration(Statement):
 @dataclass
 class Program(Node):
     statements: List[Statement]
+
+@dataclass
+class Parameter(Node):
+  name: str
+  data_type: str
