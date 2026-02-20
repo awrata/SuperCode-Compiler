@@ -3,13 +3,11 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 # ===== AST Nodes =====
-class Node:
-  pass
+#abstract
+class Node: pass
 
-class Statement(Node):
-  pass
-class Expression(Node):
-  pass
+class Statement(Node): pass
+class Expression(Node): pass
 
 @dataclass
 class DataType(Node):
@@ -53,3 +51,7 @@ class Program(Node):
 class Parameter(Node):
   name: str
   data_type: str
+
+@dataclass
+class Return(Statement):
+    value: str = None

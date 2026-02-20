@@ -19,7 +19,6 @@ def main(args):
     try:
         source = path.read_text()
         tokens = parser.tokenize(source)
-        print(tokens)
         ast = parser.parse_sc(tokens)
         print(ast)
     except Exception as e:

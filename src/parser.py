@@ -1,7 +1,7 @@
 # src/parser.py
 from enum import Enum, auto
 from dataclasses import dataclass
-from typing import List
+from typing import List, Callable
 import src.astcollections as asts
 
 # ===== Token Types =====
@@ -30,15 +30,6 @@ class Token:
     def __repr__(self):
         return f"{self.token_type.name}(value:{self.value}, position:{self.position})"
 
-# ===== Lexer config =====
-keyword_map = {'function', 'done'}
-operator_map = {'='}
-delimiter_map = {';', ':', '(', ')', ','}
-data_type_map = {'int', 'string', 'bool', 'void'}
-
-# ===== Default values (runtime) =====
-default_values = {'int':'0', 'string':'""', 'bool':'false'}
-
 # ===== Parser Constants =====
 FUNCTION_KEYWORD = 'function'
 DONE_KEYWORD = 'done'
@@ -49,6 +40,17 @@ RPAREN = ')'
 COMMA = ','
 SEMICOLON = ';'
 EOF_VALUE = 'EOF'
+RETURN_KEYWORD = 'return'
+
+# ===== Lexer config =====
+keyword_map = {FUNCTION_KEYWORD, DONE_KEYWORD, RETURN_KEYWORD}
+operator_map = {ASSIGN_OP}
+delimiter_map = {SEMICOLON, COLON, LPAREN, RPAREN, COMMA}
+data_type_map = {'int', 'string', 'bool', 'void'}
+
+# ===== Default values (runtime) =====
+default_values = {'int':'0', 'string':'""', 'bool':'false'}
+
 
 # ===== Lexer =====
 def tokenize(source: str) -> List[Token]:
@@ -68,6 +70,11 @@ def tokenize(source: str) -> List[Token]:
 
     while i < len(source):
         c = source[i]
+
+        #comments
+        if c == '#':
+            while i < len(source) and c != '\n':
+                advance()
 
         if c.isspace():
             advance()
@@ -140,6 +147,7 @@ def tokenize(source: str) -> List[Token]:
     eof = Token(TokenType.EOF, EOF_VALUE)
     eof.position = Position(column,row)
     tokens.append(eof)
+
     return tokens
 
 # ===== Error helper =====
@@ -156,7 +164,7 @@ class Parser:
         """Advance the token pointer by step positions."""
         self.i += step
 
-    def look_ahead(self, step: int, condition) -> bool:
+    def look_ahead(self, step: int, condition:Callable[[Token], bool]) -> bool:
         """Check if a token ahead satisfies the condition."""
         return self.i + step < len(self.tokens) and condition(self.tokens[self.i + step])
 
@@ -213,10 +221,19 @@ class Parser:
         self.consume()
         while self.current_token().value != DONE_KEYWORD:
             t = self.current_token()
-            if t.token_type == TokenType.DataType:
-                statements.append(self.parse_variable())
-            else:
-                statements.append(self.parse_expression())
+            match t.token_type:
+                case TokenType.DataType:
+                    var = self.parse_variable()
+                    statements.append(var)
+                case TokenType.Keyword:
+                    if t.value == FUNCTION_KEYWORD:
+                        statements.append(self.parse_function())
+                        continue
+                    if t.value == RETURN_KEYWORD:
+                        statements.append(self.parse_return())
+                case _:
+                    statements.append(self.parse_expression())
+                        
         self.consume()  # consume done
         return statements
 
@@ -268,6 +285,18 @@ class Parser:
 
         body = self.parse_block()
         return asts.FunctionDeclaration(name, asts.DataType(ret_type), param, body)
+    
+    def parse_return(self):
+        self.consume()  # consume 'return'
+        if self.current_token().value != SEMICOLON:
+            expr = self.parse_expression()
+            if self.current_token().value != SEMICOLON:
+                raise Exception(get_error_message(f"Expected '{SEMICOLON}' after return expression", self.current_token().position))
+            self.consume()  # consume semicolon
+            return asts.Return(expr)
+        else:
+            self.consume()  # consume semicolon for return without value
+            return asts.Return()
 
     def parse(self) -> asts.Program:
         """Parse the tokens and return the AST."""
